@@ -321,7 +321,7 @@ export class LocalBackend extends HeadlessBackend {
   ) {
     const [body] = args;
     const requestedCompactionSettings = compactionSettingsRecord(
-      (body as Record<string, unknown>).compaction_settings,
+      (body as Record<string, unknown>).compactijon_settings,
     );
     if (
       requestedCompactionSettings !== undefined &&
