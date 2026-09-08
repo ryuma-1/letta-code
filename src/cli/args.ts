@@ -300,6 +300,17 @@ export const CLI_FLAG_CATALOG = {
     },
   },
   "max-turns": { parser: { type: "string" }, mode: "headless" },
+  "clear-recall-memory": {
+    parser: { type: "boolean" },
+    mode: "both",
+    help: {
+      description:
+        "Delete all local recall memory (conversation history) and exit",
+      continuationLines: [
+        "Only supported with the local backend (--backend local)",
+      ],
+    },
+  },
 } as const satisfies Record<string, CliFlagDefinition>;
 
 type CliFlagCatalog = typeof CLI_FLAG_CATALOG;

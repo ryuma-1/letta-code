@@ -1246,6 +1246,78 @@ export class LocalStore {
     }
   }
 
+  /**
+   * Deletes all recall memory (conversation history) across every agent.
+   *
+   * Named conversations are removed entirely, since they are not required for
+   * their owning agent to keep functioning. Each agent's "default" conversation
+   * is special: agent state (see `projectAgent`) and strict-mode lookups assume
+   * it always exists, so it is kept in place and only its message history is
+   * cleared instead of being deleted outright.
+   */
+  clearRecallMemory(): {
+    clearedDefaultConversations: number;
+    deletedConversations: number;
+  } {
+    this.loadConversationRecordsFromStorage();
+    let clearedDefaultConversations = 0;
+    let deletedConversations = 0;
+
+    for (const [key, conversation] of [...this.conversations.entries()]) {
+      if (conversation.id === "default") {
+        this.clearDefaultConversationHistory(key, conversation);
+        clearedDefaultConversations += 1;
+        continue;
+      }
+
+      this.conversations.delete(key);
+      this.localMessagesByConversationKey.delete(key);
+      this.loadedConversationKeys.delete(key);
+      this.transcriptMetadataByConversationKey.delete(key);
+      this.sessionEntryIdsByConversationKey.delete(key);
+      this.sessionEntryIdByMessageIdByConversationKey.delete(key);
+      this.persistedMessageByMessageIdByConversationKey.delete(key);
+      this.lastSessionEntryIdByConversationKey.delete(key);
+      this.compiledSystemPromptByConversationKey.delete(key);
+      if (this.storageDir) {
+        rmSync(join(this.storageDir, "conversations", encodePathSegment(key)), {
+          recursive: true,
+          force: true,
+        });
+      }
+      deletedConversations += 1;
+    }
+
+    this.messagesById.clear();
+    return { clearedDefaultConversations, deletedConversations };
+  }
+
+  private clearDefaultConversationHistory(
+    key: string,
+    conversation: StoredConversation,
+  ): void {
+    const cleared: StoredConversation = {
+      ...conversation,
+      in_context_message_ids: [],
+      last_message_at: null,
+      updated_at: currentIsoTimestamp(),
+    };
+    this.conversations.set(key, cleared);
+    this.localMessagesByConversationKey.set(key, []);
+    this.sessionEntryIdsByConversationKey.set(key, new Set());
+    this.sessionEntryIdByMessageIdByConversationKey.set(key, new Map());
+    this.persistedMessageByMessageIdByConversationKey.set(key, new Map());
+    this.lastSessionEntryIdByConversationKey.set(key, null);
+
+    if (!this.storageDir) return;
+    const conversationDir = this.conversationDirForKey(key);
+    if (!conversationDir) return;
+    rmSync(transcriptMessagesPath(conversationDir), { force: true });
+    this.persistConversationState(cleared.id, cleared.agent_id, {
+      transcript: "skip",
+    });
+  }
+
   retrieveAgentRecord(agentId: string): LocalAgentRecord {
     if (!this.strictAgentAccess) {
       this.ensureAgent(agentId);

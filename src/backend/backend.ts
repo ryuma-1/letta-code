@@ -146,6 +146,11 @@ export interface Backend {
     options?: AgentDeleteOptions,
   ): Promise<Awaited<ReturnType<APIClient["agents"]["delete"]>>>;
 
+  clearRecallMemory?(): Promise<{
+    clearedDefaultConversations: number;
+    deletedConversations: number;
+  }>;
+
   updateAgent(
     agentId: string,
     body: AgentUpdateBody,

@@ -241,6 +241,10 @@ export class HeadlessBackend implements Backend {
     return undefined as never;
   }
 
+  async clearRecallMemory() {
+    return this.store.clearRecallMemory();
+  }
+
   async updateAgent(...args: Parameters<Backend["updateAgent"]>) {
     const [agentId, body] = args;
     return this.store.updateAgent(agentId, body);

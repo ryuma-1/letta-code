@@ -778,6 +778,22 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // Handle --clear-recall-memory: delete local conversation history and exit
+  if (values["clear-recall-memory"]) {
+    const backend = getBackend();
+    if (!backend.clearRecallMemory) {
+      console.error(
+        "Error: --clear-recall-memory is only supported with the local backend (--backend local).",
+      );
+      process.exit(1);
+    }
+    const result = await backend.clearRecallMemory();
+    console.log(
+      `Cleared recall memory: reset ${result.clearedDefaultConversations} default conversation, deleted ${result.deletedConversations} conversations.`,
+    );
+    process.exit(0);
+  }
+
   // --resume: Open agent selector UI after loading
   const shouldResume = values.resume ?? false;
   let specifiedConversationId = values.conversation ?? null; // Specific conversation to resume
