@@ -311,6 +311,17 @@ export const CLI_FLAG_CATALOG = {
       ],
     },
   },
+  "delete-agent": {
+    parser: { type: "boolean" },
+    mode: "both",
+    help: {
+      description: "Delete an agent and exit",
+      continuationLines: [
+        "With --agent <id>, deletes only that agent (backend inferred from ID)",
+        "Without --agent, deletes ALL agents on --backend api|local (required)",
+      ],
+    },
+  },
 } as const satisfies Record<string, CliFlagDefinition>;
 
 type CliFlagCatalog = typeof CLI_FLAG_CATALOG;

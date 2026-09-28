@@ -794,6 +794,62 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // Handle --delete-agent: delete a specific agent (--agent) or ALL agents, then exit.
+  // This runs before the startup backend inference below, so the target backend
+  // is resolved here from the agent ID or the explicit --backend flag.
+  if (values["delete-agent"]) {
+    const targetAgentId = values.agent ?? null;
+    const inferredDeleteBackendMode =
+      inferBackendModeFromAgentId(targetAgentId);
+    if (
+      explicitBackendMode &&
+      inferredDeleteBackendMode &&
+      explicitBackendMode !== inferredDeleteBackendMode
+    ) {
+      console.error(
+        `Error: agent ${targetAgentId} does not belong to the ${explicitBackendMode} backend.`,
+      );
+      process.exit(1);
+    }
+    const deleteBackendMode = inferredDeleteBackendMode ?? explicitBackendMode;
+    // Deleting every agent is irreversible, so never guess which backend to wipe.
+    if (!deleteBackendMode) {
+      console.error(
+        "Error: --delete-agent without --agent requires --backend api|local.",
+      );
+      process.exit(1);
+    }
+    const backend = getBackendForMode(deleteBackendMode);
+    try {
+      if (targetAgentId) {
+        await backend.deleteAgent(targetAgentId);
+        console.log(`Deleted agent ${targetAgentId}.`);
+      } else {
+        let deletedCount = 0;
+        while (true) {
+          // Deleted agents drop out of the list, so re-read the first page
+          // instead of paging with a cursor that points at a deleted agent.
+          const page = await backend.listAgents({ limit: 100 });
+          const items = page.items;
+          if (items.length === 0) break;
+          for (const agent of items) {
+            await backend.deleteAgent(agent.id);
+            deletedCount++;
+          }
+        }
+        console.log(
+          `Deleted ${deletedCount} agent(s) from the ${deleteBackendMode} backend.`,
+        );
+      }
+      process.exit(0);
+    } catch (error) {
+      console.error(
+        `Error: failed to delete agent(s): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      process.exit(1);
+    }
+  }
+
   // --resume: Open agent selector UI after loading
   const shouldResume = values.resume ?? false;
   let specifiedConversationId = values.conversation ?? null; // Specific conversation to resume
