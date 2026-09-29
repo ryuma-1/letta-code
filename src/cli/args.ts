@@ -322,6 +322,18 @@ export const CLI_FLAG_CATALOG = {
       ],
     },
   },
+  "clear-core-memory": {
+    parser: { type: "boolean" },
+    mode: "both",
+    help: {
+      description:
+        "Reset local core memory to its initial blocks (history discarded) and exit",
+      continuationLines: [
+        "With --agent <id>, resets only that agent; without, resets ALL local agents",
+        "Only supported with the local backend",
+      ],
+    },
+  },
 } as const satisfies Record<string, CliFlagDefinition>;
 
 type CliFlagCatalog = typeof CLI_FLAG_CATALOG;

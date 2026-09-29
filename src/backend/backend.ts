@@ -151,6 +151,12 @@ export interface Backend {
     deletedConversations: number;
   }>;
 
+  /**
+   * Resets an agent's core memory to its initial blocks, discarding history.
+   * Only implemented by backends that own a local memory filesystem.
+   */
+  clearCoreMemory?(agentId: string): Promise<{ restoredFiles: number }>;
+
   updateAgent(
     agentId: string,
     body: AgentUpdateBody,

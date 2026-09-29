@@ -1,4 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import type { Usage } from "@earendil-works/pi-ai";
+import { getDefaultMemoryBlocks } from "@/agent/memory";
 import {
   type InitializeLocalMemoryRepoFile,
   initializeLocalMemoryRepo,
@@ -143,6 +147,79 @@ function initialMemoryFilesFromCreateBody(
   return [...files.values()].sort((a, b) =>
     a.relativePath.localeCompare(b.relativePath),
   );
+}
+
+/**
+ * Runs a git command in the memory repo and returns its stdout.
+ */
+function memoryGitOutput(memoryDir: string, args: string[]): string {
+  return execFileSync("git", args, {
+    cwd: memoryDir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+}
+
+/**
+ * Reads the memory files from the root commit of an agent's memfs repo.
+ *
+ * The root commit is written by `initializeLocalMemoryRepo` at agent creation,
+ * so it holds exactly the blocks the agent was created with (including
+ * per-agent overrides such as the Memo persona). Returns null when the repo or
+ * its root commit cannot be read, so the caller can fall back to defaults.
+ */
+function readInitialMemoryFilesFromRootCommit(
+  memoryDir: string,
+): InitializeLocalMemoryRepoFile[] | null {
+  try {
+    const roots = memoryGitOutput(memoryDir, [
+      "rev-list",
+      "--max-parents=0",
+      "HEAD",
+    ])
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    // rev-list prints newest first; the last root is the creation commit.
+    const rootCommit = roots.at(-1);
+    if (!rootCommit) return null;
+    const paths = memoryGitOutput(memoryDir, [
+      "ls-tree",
+      "-r",
+      "--name-only",
+      rootCommit,
+    ])
+      .split("\n")
+      .map((path) => path.trim())
+      .filter((path) => path.endsWith(".md"));
+    return paths.map((relativePath) => ({
+      relativePath,
+      content: memoryGitOutput(memoryDir, [
+        "show",
+        `${rootCommit}:${relativePath}`,
+      ]),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Builds memory files from the global default memory blocks.
+ */
+async function defaultInitialMemoryFiles(): Promise<
+  InitializeLocalMemoryRepoFile[]
+> {
+  const blocks = await getDefaultMemoryBlocks();
+  return blocks
+    .map((block) =>
+      renderInitialMemoryFile({
+        label: block.label,
+        value: block.value,
+        description: block.description,
+      }),
+    )
+    .filter((file): file is InitializeLocalMemoryRepoFile => file !== null);
 }
 
 type LocalCompactionSettingsRecord = Record<string, unknown>;
@@ -350,6 +427,50 @@ export class LocalBackend extends HeadlessBackend {
       dryRun: false,
     });
     return agent;
+  }
+
+  /**
+   * Deletes the agent and its memfs directory.
+   *
+   * The store only owns `agents/` and `conversations/`, so without this the
+   * agent's core memory would be orphaned under `memfs/`.
+   */
+  override async deleteAgent(...args: Parameters<Backend["deleteAgent"]>) {
+    const [agentId] = args;
+    const result = await super.deleteAgent(...args);
+    // An explicit memoryDir is shared across agents, so never remove it here.
+    if (!this.memoryDir) {
+      rmSync(join(this.storageDir, "memfs", agentId), {
+        recursive: true,
+        force: true,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Resets an agent's core memory to the blocks it was created with.
+   *
+   * The memfs repo is recreated from scratch, so edit history is discarded.
+   * Compiled system prompts are cleared so the next turn recompiles from the
+   * fresh memory instead of treating it as a mid-conversation memory update.
+   */
+  async clearCoreMemory(agentId: string): Promise<{ restoredFiles: number }> {
+    const agent = this.store.retrieveAgentRecord(agentId);
+    if (!this.isLocalMemfsEnabled()) {
+      throw new Error(
+        "Local memfs is disabled, so there is no core memory to clear.",
+      );
+    }
+    const memoryDir = this.memoryDirForAgent(agentId);
+    // Capture the initial blocks before the repo (and its history) is removed.
+    const files =
+      readInitialMemoryFilesFromRootCommit(memoryDir) ??
+      (await defaultInitialMemoryFiles());
+    rmSync(memoryDir, { recursive: true, force: true });
+    await this.ensureLocalMemoryRepo(agentId, files, agent.name ?? undefined);
+    this.store.clearCompiledSystemPromptsForAgent(agentId);
+    return { restoredFiles: files.length };
   }
 
   override async updateAgent(

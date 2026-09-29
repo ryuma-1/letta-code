@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
   appendFile,
   mkdir,
@@ -1741,5 +1742,72 @@ describe("local backend pi transcript", () => {
     ]);
     expect(JSON.stringify(converted)).toContain('"thinking"');
     expect(JSON.stringify(converted)).toContain('"toolCall"');
+  });
+});
+
+describe("local backend core memory", () => {
+  test("clearCoreMemory restores the creation blocks and discards history", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "local-backend-core-"));
+    try {
+      const backend = new LocalBackend({
+        storageDir,
+        executionMode: "deterministic",
+      });
+      const agent = await backend.createAgent({
+        name: "Local",
+        system: "base {CORE_MEMORY}",
+        memory_blocks: [
+          { label: "persona", value: "Initial persona." },
+          { label: "human", value: "Initial human." },
+        ],
+      } as never);
+      const memoryDir = join(storageDir, "memfs", agent.id, "memory");
+      await writeFile(
+        join(memoryDir, "system", "persona.md"),
+        "---\ndescription: Persona\n---\nLearned persona.\n",
+        "utf8",
+      );
+      await writeFile(join(memoryDir, "notes.md"), "Extra note.\n", "utf8");
+      execFileSync("git", ["add", "-A"], { cwd: memoryDir });
+      execFileSync("git", ["commit", "-m", "learn"], { cwd: memoryDir });
+
+      const result = await backend.clearCoreMemory(agent.id);
+
+      expect(result.restoredFiles).toBe(2);
+      expect(
+        await readFile(join(memoryDir, "system", "persona.md"), "utf8"),
+      ).toContain("Initial persona.");
+      expect(existsSync(join(memoryDir, "notes.md"))).toBe(false);
+      const commitCount = execFileSync("git", ["rev-list", "--count", "HEAD"], {
+        cwd: memoryDir,
+        encoding: "utf8",
+      }).trim();
+      expect(commitCount).toBe("1");
+    } finally {
+      await rm(storageDir, { recursive: true, force: true });
+    }
+  });
+
+  test("deleteAgent removes the agent's memfs directory", async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), "local-backend-core-"));
+    try {
+      const backend = new LocalBackend({
+        storageDir,
+        executionMode: "deterministic",
+      });
+      const agent = await backend.createAgent({
+        name: "Local",
+        system: "base {CORE_MEMORY}",
+        memory_blocks: [{ label: "persona", value: "Initial persona." }],
+      } as never);
+      const agentMemfsDir = join(storageDir, "memfs", agent.id);
+      expect(existsSync(agentMemfsDir)).toBe(true);
+
+      await backend.deleteAgent(agent.id);
+
+      expect(existsSync(agentMemfsDir)).toBe(false);
+    } finally {
+      await rm(storageDir, { recursive: true, force: true });
+    }
   });
 });

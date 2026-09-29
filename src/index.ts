@@ -850,6 +850,59 @@ async function main(): Promise<void> {
     }
   }
 
+  // Handle --clear-core-memory: reset a specific agent (--agent) or ALL local
+  // agents' core memory to their initial blocks, then exit.
+  if (values["clear-core-memory"]) {
+    const targetAgentId = values.agent ?? null;
+    // Core memory lives in the local memfs, so only the local backend applies.
+    if (
+      explicitBackendMode === "api" ||
+      inferBackendModeFromAgentId(targetAgentId) === "api"
+    ) {
+      console.error(
+        "Error: --clear-core-memory is only supported with the local backend.",
+      );
+      process.exit(1);
+    }
+    const backend = getBackendForMode("local");
+    // Narrows the optional Backend method; LocalBackend always implements it.
+    if (!backend.clearCoreMemory) {
+      console.error(
+        "Error: local backend does not support clearing core memory.",
+      );
+      process.exit(1);
+    }
+    try {
+      if (targetAgentId) {
+        const result = await backend.clearCoreMemory(targetAgentId);
+        console.log(
+          `Cleared core memory for agent ${targetAgentId} (restored ${result.restoredFiles} initial file(s)).`,
+        );
+      } else {
+        let clearedCount = 0;
+        let after: string | undefined;
+        while (true) {
+          // Agents are kept, so page with a cursor instead of re-reading page one.
+          const page = await backend.listAgents({ limit: 100, after });
+          const items = page.items;
+          if (items.length === 0) break;
+          for (const agent of items) {
+            await backend.clearCoreMemory(agent.id);
+            clearedCount++;
+          }
+          after = items.at(-1)?.id;
+        }
+        console.log(`Cleared core memory for ${clearedCount} local agent(s).`);
+      }
+      process.exit(0);
+    } catch (error) {
+      console.error(
+        `Error: failed to clear core memory: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      process.exit(1);
+    }
+  }
+
   // --resume: Open agent selector UI after loading
   const shouldResume = values.resume ?? false;
   let specifiedConversationId = values.conversation ?? null; // Specific conversation to resume
